@@ -1,0 +1,47 @@
+#!/command/with-contenv bash
+
+# many tools default to using the home directory for runtime data.
+# as we mount a PVC to the home directory, these files might have the wrong permissions.
+# to avoid this, we set the runtime directory to a path that is NOT a persistent volume.
+export XDG_RUNTIME_DIR="/tmp/runtime-${NB_USER}"
+
+# Change to home directory (PVC will be mounted here by Kubeflow)
+cd "${HOME}" || { echo "ERROR: failed to cd to ${HOME}"; exit 1; }
+
+echo "INFO: starting VS Code server with CUDA support..."
+echo "INFO: NB_PREFIX=${NB_PREFIX}"
+echo "INFO: HOME=${HOME}"
+echo "INFO: USER=$(whoami)"
+
+# Start the service based on configuration
+if [ "${USE_NGINX_PROXY}" = "true" ]; then
+    echo "INFO: Starting with nginx proxy for NB_PREFIX support"
+
+    # Start code-server on port 8889 (internal)
+    code-server \
+        --bind-addr=127.0.0.1:8889 \
+        --config="/tmp/code-server-config" \
+        --auth=none \
+        --disable-telemetry \
+        --disable-update-check &
+
+    CODE_SERVER_PID=$!
+
+    # Wait for code-server to start
+    sleep 3
+
+    # Start nginx as reverse proxy on port 8888
+    echo "INFO: Starting nginx reverse proxy"
+    exec nginx -c /tmp/nginx/code-server.conf -g "daemon off;"
+
+else
+    echo "INFO: Starting code-server directly"
+
+    # Start code-server directly on port 8888
+    exec code-server \
+        --bind-addr=0.0.0.0:8888 \
+        --config="/tmp/code-server-config" \
+        --auth=none \
+        --disable-telemetry \
+        --disable-update-check
+fi

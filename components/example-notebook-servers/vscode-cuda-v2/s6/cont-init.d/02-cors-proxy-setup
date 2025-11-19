@@ -1,0 +1,99 @@
+#!/command/with-contenv bash
+
+# Setup CORS and proxy for Kubeflow compatibility
+echo "INFO: Setting up CORS and NB_PREFIX support for Kubeflow..."
+
+# Create nginx configuration for NB_PREFIX support and CORS headers
+mkdir -p /tmp/nginx
+
+# Check if NB_PREFIX is set and not just "/"
+if [ "${NB_PREFIX}" != "/" ] && [ -n "${NB_PREFIX}" ]; then
+    echo "INFO: Configuring nginx reverse proxy for NB_PREFIX=${NB_PREFIX}"
+
+    # Create nginx configuration
+    cat > /tmp/nginx/code-server.conf << EOF
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    server {
+        listen 0.0.0.0:8888;
+
+        # Add CORS headers for iframe support
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" always;
+
+        # Handle preflight requests
+        if (\$request_method = 'OPTIONS') {
+            add_header Access-Control-Allow-Origin *;
+            add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS";
+            add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With";
+            add_header Access-Control-Max-Age 1728000;
+            add_header Content-Type 'text/plain; charset=utf-8';
+            add_header Content-Length 0;
+            return 204;
+        }
+
+        location ${NB_PREFIX}/ {
+            # Remove the prefix from the URI before proxying
+            rewrite ^${NB_PREFIX}(.*)\$ \$1 break;
+
+            proxy_pass http://127.0.0.1:8889/;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header X-Forwarded-Host \$host;
+            proxy_set_header X-Forwarded-Port \$server_port;
+
+            # Handle WebSocket for VSCode terminal
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+
+            # Timeout settings
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+        }
+
+        # Default location for direct access
+        location / {
+            proxy_pass http://127.0.0.1:8889/;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+
+            # Handle WebSocket
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+    }
+}
+EOF
+
+    # Set environment variable to indicate nginx should be used
+    export USE_NGINX_PROXY="true"
+    echo "INFO: Nginx proxy configuration created"
+else
+    echo "INFO: NB_PREFIX is '/' or not set, using direct code-server"
+    export USE_NGINX_PROXY="false"
+fi
+
+# Create code-server configuration with CORS support
+mkdir -p /tmp/code-server-config
+cat > /tmp/code-server-config/config.yaml << EOF
+auth: none
+disable-telemetry: true
+disable-update-check: true
+extra-extensions-dir: "/opt/code-server/extensions"
+EOF
+
+echo "INFO: CORS and proxy setup complete"

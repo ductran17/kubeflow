@@ -1,0 +1,224 @@
+---
+# Kubeflow Notebook Custom Resource Example
+# This manifest creates a Kubeflow Notebook using the codeserver-python-rootless image
+
+apiVersion: kubeflow.org/v1
+kind: Notebook
+metadata:
+  name: codeserver-python-rootless-notebook
+  namespace: kubeflow-user
+  annotations:
+    notebooks.kubeflow.org/creator: system:serviceaccount:kubeflow-user:default-editor
+    notebooks.kubeflow.org/description: "Code Server with Python and Rootless Docker for secure container building"
+  labels:
+    app: codeserver-python-rootless-notebook
+    app.kubernetes.io/name: codeserver-python-rootless
+    app.kubernetes.io/component: notebook
+    app.kubernetes.io/part-of: kubeflow
+spec:
+  # Template for the Notebook pod
+  template:
+    spec:
+      # Security context for rootless Docker
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 0
+        fsGroup: 0
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+      - name: codeserver-python-rootless
+        # Use the built image
+        image: ghcr.io/kubeflow/kubeflow/notebook-servers/codeserver-python-rootless:latest
+        imagePullPolicy: Always
+
+        # Environment variables
+        env:
+        - name: DOCKER_HOST
+          value: "unix:///home/jovyan/.local/share/docker/docker.sock"
+        - name: DOCKER_CONFIG
+          value: "/home/jovyan/.config/docker"
+        - name: CONDA_DIR
+          value: "/opt/conda"
+        - name: PATH
+          value: "/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+        # Volume mounts
+        volumeMounts:
+        - name: workspace
+          mountPath: /home/jovyan
+        - name: docker-storage
+          mountPath: /home/jovyan/.local/share/docker
+          subPath: docker-storage
+        - name: docker-config
+          mountPath: /home/jovyan/.config/docker
+          subPath: docker-config
+        - name: dshm
+          mountPath: /dev/shm
+
+        # Resource requests and limits for Docker operations
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+            ephemeral-storage: "10Gi"
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+            ephemeral-storage: "20Gi"
+
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 120  # Give extra time for Docker daemon startup
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+      # Additional container for Docker build cache (optional but recommended)
+      - name: build-cache
+        image: busybox:latest
+        command: ["/bin/sh", "-c", "mkdir -p /tmp/buildkit && chmod 777 /tmp/buildkit && tail -f /dev/null"]
+        volumeMounts:
+        - name: buildkit-cache
+          mountPath: /tmp/buildkit
+        resources:
+          requests:
+            memory: "200Mi"
+            cpu: "100m"
+          limits:
+            memory: "500Mi"
+            cpu: "200m"
+
+      # Volumes
+      volumes:
+      # Main workspace volume (PVC will be automatically created by Kubeflow)
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: codeserver-python-rootless-notebook-workspace
+
+      # Dedicated volumes for Docker to avoid filling up the main workspace
+      - name: docker-storage
+        persistentVolumeClaim:
+          claimName: codeserver-python-rootless-notebook-docker-storage
+      - name: docker-config
+        persistentVolumeClaim:
+          claimName: codeserver-python-rootless-notebook-docker-config
+      - name: buildkit-cache
+        persistentVolumeClaim:
+          claimName: codeserver-python-rootless-notebook-buildkit-cache
+
+      # Shared memory for container operations
+      - name: dshm
+        emptyDir:
+          medium: Memory
+
+  # Volume claim templates - Kubeflow will create PVCs based on these
+  storage:
+    capacity: "50Gi"
+    accessModes:
+    - ReadWriteOnce
+    storageClassName: standard
+
+---
+# Additional PVCs for Docker storage (Kubeflow v1.7+ supports this)
+# Note: In older versions, these need to be created manually
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codeserver-python-rootless-notebook-docker-storage
+  namespace: kubeflow-user
+  labels:
+    app: codeserver-python-rootless-notebook
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi  # Dedicated storage for Docker images and containers
+  storageClassName: standard
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codeserver-python-rootless-notebook-docker-config
+  namespace: kubeflow-user
+  labels:
+    app: codeserver-python-rootless-notebook
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi  # Small volume for Docker configuration
+  storageClassName: standard
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codeserver-python-rootless-notebook-buildkit-cache
+  namespace: kubeflow-user
+  labels:
+    app: codeserver-python-rootless-notebook
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi  # Cache for Docker BuildKit
+  storageClassName: standard
+
+---
+# Optional: ServiceAccount with necessary RBAC permissions
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codeserver-python-rootless-sa
+  namespace: kubeflow-user
+  annotations:
+    notebooks.kubeflow.org/creator: system:serviceaccount:kubeflow-user:default-editor
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: codeserver-python-rootless-role
+  namespace: kubeflow-user
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: codeserver-python-rootless-binding
+  namespace: kubeflow-user
+subjects:
+- kind: ServiceAccount
+  name: codeserver-python-rootless-sa
+  namespace: kubeflow-user
+roleRef:
+  kind: Role
+  name: codeserver-python-rootless-role
+  apiGroup: rbac.authorization.k8s.io

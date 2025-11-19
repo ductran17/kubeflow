@@ -1,0 +1,220 @@
+---
+# CodeServer Python Rootless Docker Notebook Server
+# This manifest demonstrates how to deploy the codeserver-python-rootless notebook server
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubeflow-notebook
+  labels:
+    name: kubeflow-notebook
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: codeserver-python-rootless-service
+  namespace: kubeflow-notebook
+  labels:
+    app: codeserver-python-rootless
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: codeserver-python-rootless
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codeserver-python-rootless-pvc
+  namespace: kubeflow-notebook
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: codeserver-python-rootless
+  namespace: kubeflow-notebook
+  labels:
+    app: codeserver-python-rootless
+spec:
+  serviceName: codeserver-python-rootless-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: codeserver-python-rootless
+  template:
+    metadata:
+      labels:
+        app: codeserver-python-rootless
+    spec:
+      # Security context for rootless Docker
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 0
+        fsGroup: 0
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+      - name: codeserver-python-rootless
+        image: ghcr.io/kubeflow/kubeflow/notebook-servers/codeserver-python-rootless:latest
+        imagePullPolicy: Always
+
+        # Environment variables
+        env:
+        - name: DOCKER_HOST
+          value: "unix:///home/jovyan/.local/share/docker/docker.sock"
+        - name: DOCKER_CONFIG
+          value: "/home/jovyan/.config/docker"
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: notebook-secrets
+              key: code-server-password
+              optional: true
+
+        # Port for code-server
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+
+        # Resource requests and limits
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+
+        # Volume mounts
+        volumeMounts:
+        - name: home-pvc
+          mountPath: /home/jovyan
+        - name: docker-storage
+          mountPath: /home/jovyan/.local/share/docker
+        - name: docker-config
+          mountPath: /home/jovyan/.config/docker
+
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+      # Additional containers for Docker build cache (optional)
+      - name: build-cache
+        image: busybox:latest
+        command: ["/bin/sh", "-c", "mkdir -p /tmp/buildkit && chmod 777 /tmp/buildkit && tail -f /dev/null"]
+        volumeMounts:
+        - name: buildkit-cache
+          mountPath: /tmp/buildkit
+        resources:
+          requests:
+            memory: "100Mi"
+            cpu: "100m"
+          limits:
+            memory: "200Mi"
+            cpu: "200m"
+
+      # Volumes
+      volumes:
+      - name: docker-storage
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: docker-config
+        emptyDir:
+          sizeLimit: 100Mi
+      - name: buildkit-cache
+        emptyDir:
+          sizeLimit: 2Gi
+
+      # Persistent volume for home directory
+      volumeClaimTemplates:
+      - metadata:
+          name: home-pvc
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+---
+# Optional: Secret for authentication
+apiVersion: v1
+kind: Secret
+metadata:
+  name: notebook-secrets
+  namespace: kubeflow-notebook
+type: Opaque
+data:
+  # Base64 encoded "mysecretpassword"
+  code-server-password: bXlzZWNyZXRwYXNzd29yZA==
+
+---
+# Optional: NetworkPolicy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codeserver-python-rootless-netpol
+  namespace: kubeflow-notebook
+spec:
+  podSelector:
+    matchLabels:
+      app: codeserver-python-rootless
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - {}  # Allow all egress for Docker registry access
+
+---
+# Optional: ResourceQuota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: notebook-resources
+  namespace: kubeflow-notebook
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "6"
+    limits.memory: 12Gi
+    persistentvolumeclaims: "10"
+    requests.storage: 50Gi

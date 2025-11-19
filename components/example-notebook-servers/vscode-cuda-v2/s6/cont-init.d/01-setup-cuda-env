@@ -1,0 +1,51 @@
+#!/command/with-contenv bash
+
+# CUDA environment setup for VSCode CUDA container
+echo "INFO: Setting up CUDA environment for VSCode..."
+
+# Set up runtime directory for temporary files
+export XDG_RUNTIME_DIR="/tmp/runtime-${NB_USER}"
+mkdir -p "${XDG_RUNTIME_DIR}"
+chmod 700 "${XDG_RUNTIME_DIR}"
+
+# Create VSCode specific directories
+mkdir -p "${HOME}/.local/share/code-server"
+mkdir -p "${HOME}/.vscode-server"
+mkdir -p "${HOME}/.config/code-server"
+
+# Create temporary directories for code-server config
+mkdir -p "/tmp/code-server-config"
+
+# Set up environment variables for CUDA
+export PATH=$PATH:/usr/local/cuda/bin
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64
+export CUDA_HOME=/usr/local/cuda
+export CUDA_ROOT=/usr/local/cuda
+export CUDA_PATH=/usr/local/cuda
+
+# Verify CUDA installation
+if command -v nvcc >/dev/null 2>&1; then
+    echo "INFO: CUDA compiler found: $(nvcc --version | grep release | awk '{print $6}' | cut -c2-)"
+else
+    echo "WARNING: CUDA compiler not found"
+fi
+
+# Verify Python CUDA packages
+if python3 -c "import cupy" 2>/dev/null; then
+    echo "INFO: CuPy found: $(python3 -c 'import cupy; print(cupy.__version__)')"
+else
+    echo "WARNING: CuPy not found"
+fi
+
+if python3 -c "import torch" 2>/dev/null; then
+    echo "INFO: PyTorch found: $(python3 -c 'import torch; print(torch.__version__)')"
+    if python3 -c "import torch; print(torch.cuda.is_available())" | grep -q "True"; then
+        echo "INFO: PyTorch CUDA support is available"
+    else
+        echo "WARNING: PyTorch CUDA support not available (may be expected in CPU-only environment)"
+    fi
+else
+    echo "WARNING: PyTorch not found"
+fi
+
+echo "INFO: CUDA environment setup complete"

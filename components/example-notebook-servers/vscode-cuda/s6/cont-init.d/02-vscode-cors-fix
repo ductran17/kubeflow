@@ -1,0 +1,58 @@
+#!/command/with-contenv bash
+
+# Create a wrapper script for code-server that adds CORS headers
+echo "INFO: Setting up code-server with CORS support for Kubeflow iframes..."
+
+# Create a wrapper script that will add CORS headers
+cat > /tmp/code-server-wrapper << 'EOF'
+#!/bin/bash
+
+# Function to add CORS headers using socat
+start_with_cors() {
+    local port=8888
+    local prefix="${NB_PREFIX:-/}"
+
+    echo "INFO: Starting code-server with CORS support on port $port with prefix $prefix"
+
+    # Start code-server in background
+    code-server \
+        --bind-addr=127.0.0.1:8889 \
+        --auth=none \
+        --disable-telemetry \
+        --disable-update-check \
+        --extra-extensions-dir=/opt/code-server/extensions \
+        --server-base-path="${prefix}" &
+
+    local code_server_pid=$!
+
+    # Wait a moment for code-server to start
+    sleep 2
+
+    # Start socat to add CORS headers
+    exec socat TCP-LISTEN:$port,fork,reuseaddr EXEC:"
+        echo -e 'HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\n\r\n'; \
+        nc 127.0.0.1 8889
+    "
+}
+
+# Start with CORS if socat is available, otherwise start normally
+if command -v socat >/dev/null 2>&1; then
+    start_with_cors
+else
+    echo "WARNING: socat not found, starting code-server without CORS headers"
+    exec code-server \
+        --bind-addr=0.0.0.0:8888 \
+        --auth=none \
+        --disable-telemetry \
+        --disable-update-check \
+        --extra-extensions-dir=/opt/code-server/extensions \
+        --server-base-path="${NB_PREFIX:-/}"
+fi
+EOF
+
+chmod +x /tmp/code-server-wrapper
+
+# Install socat for CORS header support
+apt-get update && apt-get install -y socat && rm -rf /var/lib/apt/lists/*
+
+echo "INFO: CORS wrapper setup complete"

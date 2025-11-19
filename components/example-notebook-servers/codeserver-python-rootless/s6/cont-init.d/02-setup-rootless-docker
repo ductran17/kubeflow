@@ -1,0 +1,57 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+set -e
+
+echo "=== Setting up Rootless Docker ==="
+
+# Source conda environment
+. /opt/conda/etc/profile.d/conda.sh
+conda activate base
+
+# Check if rootless Docker is already initialized
+if [ -d "/home/jovyan/.local/share/docker" ] && [ -S "/home/jovyan/.local/share/docker/docker.sock" ]; then
+    echo "Rootless Docker already initialized"
+else
+    echo "Initializing rootless Docker..."
+
+    # Create necessary directories
+    mkdir -pv /home/jovyan/.local/share/docker
+    mkdir -pv /home/jovyan/.config/docker
+    mkdir -pv /home/jovyan/bin
+
+    # Set correct ownership
+    chown -R jovyan:0 /home/jovyan/.local
+    chown -R jovyan:0 /home/jovyan/.config
+
+    # Initialize rootless Docker as jovyan user
+    exec_as_user() {
+        su - jovyan -c "$1"
+    }
+
+    # Set up rootless Docker environment
+    exec_as_user "export DOCKER_HOST=unix:///home/jovyan/.local/share/docker/docker.sock"
+    exec_as_user "export DOCKER_CONFIG=/home/jovyan/.config/docker"
+
+    # Start Docker daemon in rootless mode (will be handled by the service script)
+    echo "Rootless Docker environment configured"
+fi
+
+# Create Docker configuration
+mkdir -pv /home/jovyan/.config/docker
+cat > /home/jovyan/.config/docker/daemon.json << 'EOF'
+{
+  "storage-driver": "overlay2",
+  "userland-proxy": false,
+  "experimental": false,
+  "features": {
+    "buildkit": true
+  }
+}
+EOF
+
+# Set permissions
+chown -R jovyan:0 /home/jovyan/.config/docker
+chmod 600 /home/jovyan/.config/docker/daemon.json
+
+echo "Rootless Docker setup completed successfully"
