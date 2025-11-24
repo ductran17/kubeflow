@@ -13,15 +13,15 @@ USER root
 # https://open-vsx.org/extension/ms-python/python
 # https://open-vsx.org/extension/ms-toolsai/jupyter
 # https://github.com/ipython/ipykernel/releases
-ARG CODESERVER_PYTHON_VERSION=2025.0.0
-ARG CODESERVER_JUPYTER_VERSION=2024.11.0
+ARG CODESERVER_PYTHON_VERSION=2024.10.1
+ARG CODESERVER_JUPYTER_VERSION=2024.10.0
 ARG IPYKERNEL_VERSION=6.29.5
 ARG MINIFORGE_VERSION=24.11.3-0
 ARG PIP_VERSION=24.3.1
 ARG PYTHON_VERSION=3.11.11
-ARG DOCKER_VERSION=27.4.1
-ARG DOCKER_COMPOSE_VERSION=2.30.3
-ARG DOCKER_BUILDX_VERSION=0.19.3
+ARG DOCKER_VERSION=5:27.4.1-1~ubuntu.22.04~jammy
+ARG DOCKER_COMPOSE_VERSION=2.40.3-1~ubuntu.22.04~jammy
+ARG DOCKER_BUILDX_VERSION=0.19.3-1~ubuntu.22.04~jammy
 
 # setup environment for conda
 ENV CONDA_DIR /opt/conda
@@ -63,9 +63,9 @@ RUN echo \
 # Install Docker CLI, Docker Buildx, and Docker Compose
 RUN export DEBIAN_FRONTEND=noninteractive \
  && apt-get -yq install --no-install-recommends \
-    docker-ce-cli=${DOCKER_VERSION}* \
-    docker-buildx-plugin=${DOCKER_BUILDX_VERSION}* \
-    docker-compose-plugin=${DOCKER_COMPOSE_VERSION}* \
+    docker-ce-cli=${DOCKER_VERSION} \
+    docker-buildx-plugin=${DOCKER_BUILDX_VERSION} \
+    docker-compose-plugin=${DOCKER_COMPOSE_VERSION} \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
@@ -124,8 +124,12 @@ RUN python3 -m pip install -r /tmp/requirements.txt --quiet --no-cache-dir \
  && rm -f /tmp/requirements.txt
 
 # install - codeserver extensions
-RUN code-server --install-extension "ms-python.python@${CODESERVER_PYTHON_VERSION}" --force \
- && code-server --install-extension "ms-toolsai.jupyter@${CODESERVER_JUPYTER_VERSION}" --force \
+# RUN code-server --install-extension "ms-python.python@${CODESERVER_PYTHON_VERSION}" --force \
+#  && code-server --install-extension "ms-toolsai.jupyter@${CODESERVER_JUPYTER_VERSION}" --force \
+#  && code-server --list-extensions --show-versions
+
+RUN code-server --install-extension ms-python.python --force \
+ && code-server --install-extension ms-toolsai.jupyter --force \
  && code-server --list-extensions --show-versions
 
 # home - pre-populate home with files for this image

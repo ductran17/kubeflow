@@ -20,7 +20,7 @@ TAG      ?= sha-$(GIT_COMMIT)$(GIT_TREE_STATE)
 
 IMAGE_NAME := codeserver-python-root
 
-BASE_IMAGE         := $(REGISTRY)/codeserver:$(TAG)
+BASE_IMAGE         := $(REGISTRY)/codeserver:v1.9.2
 BASE_IMAGE_FOLDERS := codeserver
 
 # we use a separate registry-type cache to keep the main registry clean

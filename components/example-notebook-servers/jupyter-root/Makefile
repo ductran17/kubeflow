@@ -13,15 +13,15 @@
 #
 
 GIT_COMMIT     := $(shell git rev-parse HEAD)
-GIT_TREE_STATE := $(shell test -n "`git status --porcelain`" && echo "-dirty" || echo "")
+GIT_TREE_STATE := $(shell test -n "`git status --porcelain`" && echo "-dirty" || "")
 
 REGISTRY ?= ghcr.io/kubeflow/kubeflow/notebook-servers
 TAG      ?= sha-$(GIT_COMMIT)$(GIT_TREE_STATE)
 
-IMAGE_NAME := codeserver-python-rootless
+IMAGE_NAME := jupyter-root
 
-BASE_IMAGE         := $(REGISTRY)/codeserver-python:v1.9.2
-BASE_IMAGE_FOLDERS := codeserver
+BASE_IMAGE         := $(REGISTRY)/base:$(TAG)
+BASE_IMAGE_FOLDERS := base
 
 # we use a separate registry-type cache to keep the main registry clean
 # https://docs.docker.com/build/cache/backends/
