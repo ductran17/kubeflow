@@ -1,0 +1,8 @@
+# kubeflow packages
+kfp==2.11.0
+
+# jupyterlab extensions
+jupyterlab-git==0.50.2
+
+# Additional Python packages for MATLAB Runtime and system integration
+setuptools
